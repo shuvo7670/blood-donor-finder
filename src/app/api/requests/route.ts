@@ -1,60 +1,52 @@
 import type { NextRequest } from "next/server";
-import { isBloodGroup } from "@/lib/blood";
-import { readDb, toRequestResult, updateDb } from "@/lib/db";
+import { isBloodGroup, type BloodGroup } from "@/lib/blood";
 import { isLatLng } from "@/lib/geo";
-import type { BloodRequest, LatLng, Urgency } from "@/lib/types";
+import { currentDonorId } from "@/lib/server/auth";
+import { findDonor } from "@/lib/server/donors";
+import { clientIp, handle, HttpError, rateLimit, readJson } from "@/lib/server/http";
+import { createRequest, listPublicRequests } from "@/lib/server/requests";
+import { getSettings } from "@/lib/server/settings";
 import { validateRequest } from "@/lib/validate";
 
-const URGENCY_RANK: Record<Urgency, number> = { critical: 0, urgent: 1, normal: 2 };
-
 /**
- * GET /api/requests
- *   status   open (default) | fulfilled | all
+ * GET /api/requests (approved requests only)
+ *   status   open (default) | all (open + fulfilled)
  *   group    blood group
  *   lat, lng adds distanceKm to each request
  */
 export async function GET(request: NextRequest) {
-  const sp = request.nextUrl.searchParams;
-  const status = sp.get("status") ?? "open";
-  const group = sp.get("group");
-  const lat = Number(sp.get("lat"));
-  const lng = Number(sp.get("lng"));
-  const origin: LatLng | null = sp.has("lat") && sp.has("lng") && isLatLng(lat, lng) ? { lat, lng } : null;
-
-  if (group && !isBloodGroup(group)) return Response.json({ error: "Unknown blood group" }, { status: 400 });
-
-  const { requests } = await readDb();
-  const results = requests
-    .filter((r) => status === "all" || r.status === status)
-    .filter((r) => !group || r.bloodGroup === group)
-    .map((r) => toRequestResult(r, origin))
-    .sort(
-      (a, b) =>
-        Number(a.status === "fulfilled") - Number(b.status === "fulfilled") ||
-        URGENCY_RANK[a.urgency] - URGENCY_RANK[b.urgency] ||
-        a.neededBy.localeCompare(b.neededBy),
-    );
-
-  return Response.json({ total: results.length, requests: results });
+  return handle(() => {
+    const sp = request.nextUrl.searchParams;
+    const group = sp.get("group");
+    if (group && !isBloodGroup(group)) throw new HttpError(400, "Unknown blood group");
+    const lat = Number(sp.get("lat"));
+    const lng = Number(sp.get("lng"));
+    const requests = listPublicRequests({
+      status: sp.get("status") === "all" ? "all" : "open",
+      group: (group as BloodGroup) || null,
+      origin: sp.has("lat") && sp.has("lng") && isLatLng(lat, lng) ? { lat, lng } : null,
+    });
+    return Response.json({ total: requests.length, requests });
+  });
 }
 
-/** POST /api/requests: post a new blood request. */
+/**
+ * POST /api/requests: returns the request and a private manage URL (shown once).
+ * Goes live at once when auto-approve is on or an approved donor posts it; otherwise it
+ * waits in the moderators' queue.
+ */
 export async function POST(request: Request) {
-  const body = await request.json().catch(() => null);
-  if (!body || typeof body !== "object") return Response.json({ error: "Invalid JSON" }, { status: 400 });
+  return handle(async () => {
+    rateLimit(`request:${clientIp(request)}`, 10, 60 * 60 * 1000);
+    const parsed = validateRequest(await readJson(request));
+    if (!parsed.ok) throw new HttpError(422, "Invalid request", parsed.errors);
 
-  const parsed = validateRequest(body);
-  if (!parsed.ok) return Response.json({ errors: parsed.errors }, { status: 422 });
+    const donorId = await currentDonorId();
+    const trusted = donorId ? findDonor(donorId)?.status === "approved" : false;
+    const status = trusted || getSettings().autoApproveRequests ? "open" : "pending";
 
-  const created = await updateDb((db) => {
-    const item: BloodRequest = {
-      ...parsed.value,
-      id: `r${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
-      status: "open",
-      createdAt: new Date().toISOString(),
-    };
-    db.requests.push(item);
-    return item;
+    const { request: created, token } = createRequest(parsed.value, status);
+    const manageUrl = `/requests/manage?${new URLSearchParams({ id: created.id, token })}`;
+    return Response.json({ request: created, manageUrl }, { status: 201 });
   });
-  return Response.json({ request: created }, { status: 201 });
 }

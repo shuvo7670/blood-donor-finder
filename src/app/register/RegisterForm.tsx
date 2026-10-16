@@ -8,7 +8,8 @@ import { Field, inputClass } from "@/components/ui";
 import { donatesTo, MAX_AGE, MIN_AGE, MIN_WEIGHT_KG, type BloodGroup } from "@/lib/blood";
 import { bn, formatDate } from "@/lib/format";
 import { CITIES } from "@/lib/geo";
-import type { DonorResult, Gender, LatLng } from "@/lib/types";
+import { api } from "@/lib/client";
+import type { DonorDetail, Gender, LatLng } from "@/lib/types";
 
 export default function RegisterForm() {
   const [bloodGroup, setBloodGroup] = useState<BloodGroup | "">("");
@@ -19,16 +20,18 @@ export default function RegisterForm() {
   const [available, setAvailable] = useState(true);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
-  const [created, setCreated] = useState<DonorResult | null>(null);
+  const [created, setCreated] = useState<DonorDetail | null>(null);
 
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
+    if (form.get("pin") !== form.get("pin2")) {
+      setErrors({ pin2: "দুটি পিন মেলেনি।" });
+      return;
+    }
     setSubmitting(true);
-    const res = await fetch("/api/donors", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    const res = await api<{ donor: DonorDetail }>("/api/donors", {
+      body: {
         ...Object.fromEntries(form),
         bloodGroup,
         gender,
@@ -37,16 +40,15 @@ export default function RegisterForm() {
         available,
         lat: point?.lat,
         lng: point?.lng,
-      }),
+      },
     });
     setSubmitting(false);
-    const data = await res.json().catch(() => ({}));
     if (res.ok) {
-      setCreated(data.donor);
+      setCreated(res.data.donor);
       window.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }
-    setErrors(data.errors ?? { form: "নিবন্ধন করা যায়নি, আবার চেষ্টা করুন।" });
+    setErrors(Object.keys(res.errors).length ? res.errors : { form: res.error });
   }
 
   if (created) {
@@ -54,10 +56,16 @@ export default function RegisterForm() {
       <div className="mx-auto max-w-lg space-y-4 p-4 text-center">
         <div className="text-6xl">🎉</div>
         <h1 className="text-2xl font-bold">ধন্যবাদ, {created.name}!</h1>
-        <p className="text-stone-600">
-          আপনি এখন <b className="text-red-600">{created.bloodGroup}</b> রক্তদাতা হিসেবে তালিকায় আছেন। {created.area}-এর কাছে কারো রক্ত লাগলে
-          তারা আপনাকে খুঁজে পাবেন।
-        </p>
+        {created.status === "pending" ? (
+          <p className="rounded-2xl bg-amber-50 p-4 text-amber-900">
+            আপনার নিবন্ধন জমা হয়েছে। একজন মডারেটর তথ্য যাচাই করে অনুমোদন দিলেই আপনি ডোনার তালিকায় দেখাবেন। অবস্থা দেখতে পারবেন “আমার প্রোফাইল”-এ।
+          </p>
+        ) : (
+          <p className="text-stone-600">
+            আপনি এখন <b className="text-red-600">{created.bloodGroup}</b> রক্তদাতা হিসেবে তালিকায় আছেন। {created.area}-এর কাছে কারো রক্ত লাগলে
+            তারা আপনাকে খুঁজে পাবেন।
+          </p>
+        )}
         <div className="rounded-2xl bg-red-50 p-4 text-left text-sm text-red-900">
           <p>
             আপনার রক্ত নিতে পারবেন: <b>{donatesTo(created.bloodGroup).join(", ")}</b>
@@ -65,11 +73,8 @@ export default function RegisterForm() {
           {created.nextEligibleDate && <p className="mt-1">পরবর্তী রক্তদান: {formatDate(created.nextEligibleDate)} থেকে</p>}
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:justify-center">
-          <Link
-            href={`/find?${new URLSearchParams({ lat: String(created.lat), lng: String(created.lng), label: created.area })}`}
-            className="rounded-xl bg-red-600 px-5 py-3 font-semibold text-white"
-          >
-            ম্যাপে নিজেকে দেখুন
+          <Link href="/me" className="rounded-xl bg-red-600 px-5 py-3 font-semibold text-white">
+            আমার প্রোফাইল
           </Link>
           <Link href="/requests" className="rounded-xl border border-stone-200 px-5 py-3 font-semibold">
             জরুরি অনুরোধগুলো দেখুন
@@ -88,6 +93,10 @@ export default function RegisterForm() {
         <Link href="/eligibility" className="text-red-600 underline">
           যোগ্যতা যাচাই করুন
         </Link>
+        {" · "}আগে নিবন্ধন করেছেন?{" "}
+        <Link href="/me" className="text-red-600 underline">
+          লগইন
+        </Link>
       </p>
 
       <form onSubmit={submit} className="space-y-4 rounded-2xl border border-stone-200 bg-white p-4 shadow-sm" noValidate>
@@ -97,6 +106,15 @@ export default function RegisterForm() {
         <Field label="মোবাইল নম্বর" error={errors.phone} hint="রোগীর স্বজনরা এই নম্বরে যোগাযোগ করবেন">
           <input name="phone" type="tel" inputMode="tel" placeholder="01XXXXXXXXX" className={inputClass} autoComplete="tel" aria-invalid={!!errors.phone} />
         </Field>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="পিন (৪–৬ সংখ্যা)" error={errors.pin} hint="প্রোফাইলে লগইনের জন্য">
+            <input name="pin" type="password" inputMode="numeric" maxLength={6} autoComplete="new-password" className={inputClass} aria-invalid={!!errors.pin} />
+          </Field>
+          <Field label="পিন আবার দিন" error={errors.pin2}>
+            <input name="pin2" type="password" inputMode="numeric" maxLength={6} autoComplete="new-password" className={inputClass} aria-invalid={!!errors.pin2} />
+          </Field>
+        </div>
 
         <Field label="রক্তের গ্রুপ" error={errors.bloodGroup}>
           <BloodGroupPicker value={bloodGroup} onChange={setBloodGroup} size="lg" />

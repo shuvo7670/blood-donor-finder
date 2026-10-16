@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import BloodGroupPicker from "@/components/BloodGroupPicker";
 import LocationField from "@/components/LocationField";
 import RequestCard, { URGENCY } from "@/components/RequestCard";
+import { api } from "@/lib/client";
 import { Field, inputClass } from "@/components/ui";
 import type { BloodGroup } from "@/lib/blood";
 import type { LatLng, RequestResult, Urgency } from "@/lib/types";
@@ -29,7 +30,7 @@ export default function RequestsBoard() {
   const [status, setStatus] = useState<"open" | "all">("open");
   const [version, setVersion] = useState(0);
   const [result, setResult] = useState<{ key: string; requests: RequestResult[] } | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [created, setCreated] = useState<{ request: RequestResult; manageUrl: string } | null>(null);
 
   const key = `${status}|${group}|${version}`;
   useEffect(() => {
@@ -49,18 +50,6 @@ export default function RequestsBoard() {
   const loading = result?.key !== key;
   const requests = result?.requests ?? [];
 
-  async function markFulfilled(id: string) {
-    const res = await fetch(`/api/requests/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "fulfilled" }),
-    });
-    if (res.ok) {
-      setNotice("ধন্যবাদ! অনুরোধটি সম্পন্ন হিসেবে চিহ্নিত করা হয়েছে।");
-      load();
-    }
-  }
-
   return (
     <div className="mx-auto max-w-3xl space-y-4 p-4">
       <div className="flex items-start justify-between gap-3">
@@ -78,18 +67,14 @@ export default function RequestsBoard() {
         )}
       </div>
 
-      {notice && (
-        <p className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800" role="status">
-          {notice}
-        </p>
-      )}
+      {created && <CreatedNotice {...created} onClose={() => setCreated(null)} />}
 
       {showForm && (
         <RequestForm
           onCancel={() => setShowForm(false)}
-          onCreated={() => {
+          onCreated={(result) => {
             setShowForm(false);
-            setNotice("অনুরোধ পোস্ট করা হয়েছে। নিচের ‘কাছের ডোনার খুঁজুন’ চাপলে আশেপাশের ডোনারদের তালিকা পাবেন।");
+            setCreated(result);
             setStatus("open");
             setGroup("");
             load();
@@ -122,7 +107,7 @@ export default function RequestsBoard() {
       ) : (
         <div className="space-y-3">
           {requests.map((r) => (
-            <RequestCard key={r.id} request={r} onFulfilled={markFulfilled} />
+            <RequestCard key={r.id} request={r} onResponded={load} />
           ))}
         </div>
       )}
@@ -130,7 +115,46 @@ export default function RequestsBoard() {
   );
 }
 
-function RequestForm({ onCancel, onCreated }: { onCancel: () => void; onCreated: () => void }) {
+function CreatedNotice({ request, manageUrl, onClose }: { request: RequestResult; manageUrl: string; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const fullUrl = typeof window === "undefined" ? manageUrl : `${window.location.origin}${manageUrl}`;
+  return (
+    <div className="space-y-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900" role="status">
+      <div className="flex items-start justify-between gap-2">
+        <p className="font-semibold">
+          {request.status === "pending"
+            ? "✓ অনুরোধ জমা হয়েছে। মডারেটর যাচাই করলেই সবাই দেখতে পাবেন।"
+            : "✓ অনুরোধ প্রকাশিত হয়েছে।"}
+        </p>
+        <button onClick={onClose} aria-label="বন্ধ করুন" className="text-emerald-700">
+          ✕
+        </button>
+      </div>
+      <p>
+        <b>এই লিংকটি সংরক্ষণ করুন।</b> এখান থেকে কারা সাড়া দিলেন দেখবেন এবং রক্ত পেলে অনুরোধটি বন্ধ করবেন। লিংকটি আর দেখানো হবে না।
+      </p>
+      <div className="flex gap-2">
+        <a href={manageUrl} className="flex-1 rounded-xl bg-emerald-600 py-2 text-center font-semibold text-white">
+          অনুরোধ পরিচালনা করুন
+        </a>
+        <button
+          onClick={() => navigator.clipboard?.writeText(fullUrl).then(() => setCopied(true))}
+          className="rounded-xl border border-emerald-300 bg-white px-3 font-semibold"
+        >
+          {copied ? "✓ কপি হয়েছে" : "লিংক কপি"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function RequestForm({
+  onCancel,
+  onCreated,
+}: {
+  onCancel: () => void;
+  onCreated: (result: { request: RequestResult; manageUrl: string }) => void;
+}) {
   const [bloodGroup, setBloodGroup] = useState<BloodGroup | "">("");
   const [urgency, setUrgency] = useState<Urgency>("urgent");
   const [point, setPoint] = useState<LatLng | null>(null);
@@ -143,10 +167,8 @@ function RequestForm({ onCancel, onCreated }: { onCancel: () => void; onCreated:
     e.preventDefault();
     const form = new FormData(e.currentTarget);
     setSubmitting(true);
-    const res = await fetch("/api/requests", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    const res = await api<{ request: RequestResult; manageUrl: string }>("/api/requests", {
+      body: {
         ...Object.fromEntries(form),
         bags: Number(form.get("bags")),
         neededBy: toIso(String(form.get("neededBy"))),
@@ -156,12 +178,11 @@ function RequestForm({ onCancel, onCreated }: { onCancel: () => void; onCreated:
         city,
         lat: point?.lat,
         lng: point?.lng,
-      }),
+      },
     });
     setSubmitting(false);
-    if (res.ok) return onCreated();
-    const data = await res.json().catch(() => ({}));
-    setErrors(data.errors ?? { form: "পোস্ট করা যায়নি, আবার চেষ্টা করুন।" });
+    if (res.ok) return onCreated(res.data);
+    setErrors(Object.keys(res.errors).length ? res.errors : { form: res.error });
   }
 
   return (

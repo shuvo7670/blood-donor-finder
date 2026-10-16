@@ -10,7 +10,7 @@ import type { MapMarker } from "@/components/map/types";
 import { isBloodGroup, RECEIVES_FROM, type BloodGroup } from "@/lib/blood";
 import { bn } from "@/lib/format";
 import { DEFAULT_CENTER, isLatLng } from "@/lib/geo";
-import type { DonorResult, LatLng } from "@/lib/types";
+import type { PublicDonor, LatLng } from "@/lib/types";
 
 const RADII = [2, 5, 10, 25, 50, 0];
 
@@ -45,7 +45,7 @@ export default function FindDonors() {
   const [areaKey, setAreaKey] = useState("");
 
   // Each response is tagged with the query it answers; a mismatch means a newer one is in flight.
-  const [result, setResult] = useState<{ query: string; donors: DonorResult[]; total: number; error: string | null } | null>(null);
+  const [result, setResult] = useState<{ query: string; donors: PublicDonor[]; total: number; error: string | null } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const cardRefs = useRef(new Map<string, HTMLLIElement>());
 
@@ -76,7 +76,7 @@ export default function FindDonors() {
     const controller = new AbortController();
     fetch(`/api/donors?${query}`, { signal: controller.signal })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((data: { donors: DonorResult[]; total: number }) =>
+      .then((data: { donors: PublicDonor[]; total: number }) =>
         setResult({ query, donors: data.donors, total: data.total, error: null }),
       )
       .catch((e) => {

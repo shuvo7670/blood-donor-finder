@@ -49,6 +49,19 @@ export default function Home() {
           </Link>
         </section>
 
+        <section className="grid grid-cols-2 gap-3">
+          <Link href="/blood-banks" className="rounded-2xl bg-white p-4 shadow-sm">
+            <div className="text-2xl">🏥</div>
+            <p className="mt-1 font-semibold">ব্লাড ব্যাংক</p>
+            <p className="text-xs text-stone-500">কাছের ব্লাড ব্যাংক ও সংগঠন</p>
+          </Link>
+          <Link href="/eligibility" className="rounded-2xl bg-white p-4 shadow-sm">
+            <div className="text-2xl">✅</div>
+            <p className="mt-1 font-semibold">যোগ্যতা যাচাই</p>
+            <p className="text-xs text-stone-500">আমি কি রক্ত দিতে পারব?</p>
+          </Link>
+        </section>
+
         <p className="text-center text-xs text-stone-400">
           ডেমো সংস্করণ: তালিকার ডোনার ও নম্বরগুলো কাল্পনিক।
         </p>

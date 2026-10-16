@@ -1,8 +1,10 @@
 "use client";
 
-import { forwardRef } from "react";
-import { directionsUrl, formatDate, formatDistance, internationalPhone, bn } from "@/lib/format";
-import type { DonorResult } from "@/lib/types";
+import { forwardRef, useState } from "react";
+import ReportButton from "@/components/ReportButton";
+import { api } from "@/lib/client";
+import { bn, directionsUrl, formatDate, formatDistance, internationalPhone } from "@/lib/format";
+import type { PublicDonor } from "@/lib/types";
 
 export function ContactButtons({ phone, name, lat, lng }: { phone: string; name: string; lat?: number; lng?: number }) {
   const btn = "flex flex-1 items-center justify-center gap-1 rounded-xl py-2 text-sm font-semibold";
@@ -11,12 +13,7 @@ export function ContactButtons({ phone, name, lat, lng }: { phone: string; name:
       <a href={`tel:${phone}`} className={`${btn} bg-red-600 text-white`} aria-label={`${name}-কে কল করুন`}>
         📞 কল
       </a>
-      <a
-        href={`https://wa.me/${internationalPhone(phone)}`}
-        target="_blank"
-        rel="noreferrer"
-        className={`${btn} bg-emerald-600 text-white`}
-      >
+      <a href={`https://wa.me/${internationalPhone(phone)}`} target="_blank" rel="noreferrer" className={`${btn} bg-emerald-600 text-white`}>
         💬 WhatsApp
       </a>
       {lat !== undefined && lng !== undefined && (
@@ -28,8 +25,45 @@ export function ContactButtons({ phone, name, lat, lng }: { phone: string; name:
   );
 }
 
+/** Numbers are masked in lists; one tap fetches the real one (rate limited server-side). */
+function RevealContact({ donor }: { donor: PublicDonor }) {
+  const [phone, setPhone] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function reveal() {
+    setLoading(true);
+    const res = await api<{ phone: string }>(`/api/donors/${donor.id}/contact`, { method: "POST" });
+    setLoading(false);
+    if (res.ok) setPhone(res.data.phone);
+    else setError(res.error);
+  }
+
+  if (phone) {
+    return (
+      <div className="space-y-2">
+        <p className="text-center font-mono text-lg font-semibold tracking-wide">{phone}</p>
+        <ContactButtons phone={phone} name={donor.name} lat={donor.lat} lng={donor.lng} />
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-1">
+      <button
+        type="button"
+        onClick={reveal}
+        disabled={loading}
+        className="w-full rounded-xl bg-red-600 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+      >
+        {loading ? "…" : `📞 নম্বর দেখুন (${donor.phoneMasked})`}
+      </button>
+      {error && <p className="text-xs text-red-600">{error}</p>}
+    </div>
+  );
+}
+
 type Props = {
-  donor: DonorResult;
+  donor: PublicDonor;
   selected?: boolean;
   onSelect?: () => void;
 };
@@ -54,9 +88,7 @@ const DonorCard = forwardRef<HTMLLIElement, Props>(function DonorCard({ donor, s
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-2">
             <h3 className="truncate font-semibold">{donor.name}</h3>
-            {donor.verified && (
-              <span className="rounded-full bg-sky-50 px-2 text-xs font-medium text-sky-700">✓ যাচাইকৃত</span>
-            )}
+            {donor.verified && <span className="rounded-full bg-sky-50 px-2 text-xs font-medium text-sky-700">✓ যাচাইকৃত</span>}
           </div>
           <p className="text-sm text-stone-500">
             📍 {donor.area}, {donor.city}
@@ -81,11 +113,14 @@ const DonorCard = forwardRef<HTMLLIElement, Props>(function DonorCard({ donor, s
       </div>
       {selected && (
         <div className="mt-3 space-y-2" onClick={(e) => e.stopPropagation()}>
-          <p className="text-sm text-stone-600">
-            {donor.lastDonation ? `শেষ রক্তদান: ${formatDate(donor.lastDonation)}` : "আগে কখনো রক্ত দেননি"}
-            {" · "}বয়স {bn(donor.age)}
-          </p>
-          <ContactButtons phone={donor.phone} name={donor.name} lat={donor.lat} lng={donor.lng} />
+          <div className="flex items-center justify-between text-sm text-stone-600">
+            <span>
+              {donor.lastDonation ? `শেষ রক্তদান: ${formatDate(donor.lastDonation)}` : "আগে কখনো রক্ত দেননি"}
+              {" · "}বয়স {bn(donor.age)}
+            </span>
+            <ReportButton targetType="donor" targetId={donor.id} />
+          </div>
+          <RevealContact donor={donor} />
         </div>
       )}
     </li>

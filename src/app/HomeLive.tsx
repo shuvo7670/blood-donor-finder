@@ -21,12 +21,17 @@ export default function HomeLive() {
     { label: "নিবন্ধিত ডোনার", value: stats?.totalDonors },
     { label: "এখন প্রস্তুত", value: stats?.eligibleDonors },
     { label: "চলমান অনুরোধ", value: stats?.openRequests },
-    { label: "মোট রক্তদান", value: stats?.totalDonations },
+    { label: "রক্ত পাওয়া গেছে", value: stats?.fulfilledRequests },
   ];
   const maxGroup = stats ? Math.max(...BLOOD_GROUPS.map((g) => stats.byGroup[g].total), 1) : 1;
 
   return (
     <>
+      {stats?.announcement && (
+        <p className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900" role="status">
+          📢 {stats.announcement}
+        </p>
+      )}
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {tiles.map((t) => (
           <div key={t.label} className="rounded-2xl bg-white p-4 shadow-sm">

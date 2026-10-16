@@ -2,6 +2,9 @@ import type { BloodGroup } from "./blood";
 import { AREAS } from "./geo";
 import type { BloodRequest, Donor, Gender, Urgency } from "./types";
 
+export type SeedDonor = Omit<Donor, "status" | "statusReason" | "contactViews" | "updatedAt">;
+export type SeedRequest = Omit<BloodRequest, "statusReason" | "updatedAt">;
+
 // Deterministic PRNG so every fresh database holds the same demo donors.
 function mulberry32(seed: number) {
   return () => {
@@ -30,7 +33,7 @@ const GROUP_WEIGHTS: [BloodGroup, number][] = [
   ["B+", 30], ["O+", 29], ["A+", 24], ["AB+", 8], ["B-", 2.5], ["O-", 2.5], ["A-", 2.5], ["AB-", 1.5],
 ];
 
-export function createSeed(now = Date.now()): { donors: Donor[]; requests: BloodRequest[] } {
+export function createSeed(now = Date.now()): { donors: SeedDonor[]; requests: SeedRequest[] } {
   const rand = mulberry32(2026);
   const pick = <T,>(list: T[]) => list[Math.floor(rand() * list.length)];
   const between = (min: number, max: number) => Math.floor(min + rand() * (max - min + 1));
@@ -42,7 +45,7 @@ export function createSeed(now = Date.now()): { donors: Donor[]; requests: Blood
   };
   const day = 24 * 60 * 60 * 1000;
 
-  const donors: Donor[] = [];
+  const donors: SeedDonor[] = [];
   // Dhaka areas get more donors, like the real distribution of volunteers.
   const slots = AREAS.flatMap((area) => Array(area.city === "ঢাকা" ? 9 : 5).fill(area));
   slots.forEach((area, i) => {
@@ -80,7 +83,7 @@ export function createSeed(now = Date.now()): { donors: Donor[]; requests: Blood
     [4, "O+", 2, "normal", 48, "পরিকল্পিত অপারেশন।"],
     [5, "B-", 1, "urgent", 16, "ডেঙ্গু রোগী, প্লাটিলেট কমে গেছে।"],
   ];
-  const requests: BloodRequest[] = requestSeeds.map(([h, group, bags, urgency, inHours, note], i) => {
+  const requests: SeedRequest[] = requestSeeds.map(([h, group, bags, urgency, inHours, note], i) => {
     const hospital = HOSPITALS[h];
     return {
       id: `r${String(i + 1).padStart(3, "0")}`,
